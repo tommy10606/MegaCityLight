@@ -1,0 +1,5 @@
+# Checks public, published GitHub releases once per server boot.
+# Tags should use vMAJOR.MINOR.PATCH, e.g. v1.0.1.
+# Notifications appear in the server console; nothing is downloaded or installed.
+update-checker:
+  enabled: true

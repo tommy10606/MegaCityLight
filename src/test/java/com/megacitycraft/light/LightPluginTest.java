@@ -7,6 +7,8 @@ import org.bukkit.Material;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.configuration.file.YamlConfiguration;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.junit.jupiter.api.AfterEach;
@@ -24,7 +26,9 @@ class LightPluginTest {
 
     @BeforeEach void setUp() {
         server = MockBukkit.mock();
-        plugin = MockBukkit.load(LightPlugin.class);
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("update-checker.enabled", false); // Tests must not contact GitHub.
+        plugin = MockBukkit.loadWithConfig(LightPlugin.class, config);
         player = server.addPlayer();
         player.setOp(false);
         tick();
@@ -33,6 +37,20 @@ class LightPluginTest {
     @AfterEach void tearDown() { MockBukkit.unmock(); }
     private void tick() { server.getScheduler().performTicks(2); }
     private boolean hasVision() { return player.hasPotionEffect(PotionEffectType.NIGHT_VISION); }
+
+    @Test void versionShowsActiveMetadataWithoutChangingNightVision() {
+        while (player.nextComponentMessage() != null) { /* Drain join messages. */ }
+        assertTrue(player.performCommand("light version"));
+        assertEquals("MegaCityLight v1.0.1", PlainTextComponentSerializer.plainText().serialize(player.nextComponentMessage()));
+        assertFalse(hasVision());
+        player.performCommand("light on");
+        player.performCommand("light VERSION");
+        assertTrue(hasVision());
+        assertTrue(plugin.getCommand("light").tabComplete(player, "light", new String[]{"v"}).contains("version"));
+        assertEquals(java.util.List.of("Tommy10606"), plugin.getPluginMeta().getAuthors());
+        assertEquals("https://github.com/tommy10606/MegaCityLight", plugin.getPluginMeta().getWebsite());
+        assertTrue(server.dispatchCommand(server.getConsoleSender(), "light version"));
+    }
 
     @Test void newPlayerStartsOffAndNonOpCanToggle() {
         assertFalse(player.isOp());

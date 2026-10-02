@@ -21,12 +21,17 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitTask;
 
 public class LightPlugin extends JavaPlugin implements Listener {
     private PlayerSettings settings;
+    private BukkitTask updateTask;
+    private volatile boolean stopping;
 
     @Override
     public void onEnable() {
+        stopping = false;
+        saveDefaultConfig();
         try {
             settings = new PlayerSettings(getDataFolder().toPath().resolve("players.yml"));
         } catch (IOException | InvalidConfigurationException error) {
@@ -39,10 +44,45 @@ public class LightPlugin extends JavaPlugin implements Listener {
         command.setTabCompleter(this);
         getServer().getPluginManager().registerEvents(this, this);
         for (Player player : getServer().getOnlinePlayers()) restoreLater(player);
+        if (getConfig().getBoolean("update-checker.enabled", true)) {
+            // HTTP never runs on the game thread. Timeouts bound failed requests.
+            updateTask = getServer().getScheduler().runTaskLaterAsynchronously(this,
+                    this::checkForUpdates, 20L);
+        }
+    }
+
+    @Override
+    public void onDisable() {
+        stopping = true;
+        if (updateTask != null) updateTask.cancel();
+    }
+
+    private void checkForUpdates() {
+        if (stopping) return;
+        try {
+            var result = new ReleaseChecker().check(getPluginMeta().getVersion());
+            if (stopping) return;
+            if (result.latestTag() == null) {
+                getLogger().info("No published stable GitHub release found; update status is unknown.");
+            } else if (result.updateAvailable()) {
+                getLogger().info("Update Available!");
+                getLogger().info("Running v" + getPluginMeta().getVersion() + "; latest "
+                        + result.latestTag() + ". Download: " + ReleaseChecker.RELEASES_URL);
+            } else {
+                getLogger().info("Running the most up to date version.");
+            }
+        } catch (IOException error) {
+            if (!stopping) getLogger().warning("Update check unavailable: " + error.getMessage()
+                    + ". Night vision is unaffected; will check again on the next server boot.");
+        }
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 1 && args[0].equalsIgnoreCase("version")) {
+            sender.sendMessage(Component.text("MegaCityLight v" + getPluginMeta().getVersion(), NamedTextColor.GOLD));
+            return true;
+        }
         if (!(sender instanceof Player player)) {
             sender.sendMessage(Component.text("Use /light in-game to change your own night vision.", NamedTextColor.RED));
             return true;
@@ -66,9 +106,11 @@ public class LightPlugin extends JavaPlugin implements Listener {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (!(sender instanceof Player) || args.length != 1) return List.of();
+        if (args.length != 1) return List.of();
         String prefix = args[0].toLowerCase(Locale.ROOT);
-        return List.of("on", "enable", "off", "disable").stream().filter(value -> value.startsWith(prefix)).toList();
+        List<String> choices = sender instanceof Player
+                ? List.of("on", "enable", "off", "disable", "version") : List.of("version");
+        return choices.stream().filter(value -> value.startsWith(prefix)).toList();
     }
 
     @EventHandler
@@ -127,6 +169,6 @@ public class LightPlugin extends JavaPlugin implements Listener {
     }
 
     private void showUsage(Player player) {
-        player.sendMessage(Component.text("Usage: /light [on|enable|off|disable]", NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("Usage: /light [on|enable|off|disable|version]", NamedTextColor.YELLOW));
     }
 }
