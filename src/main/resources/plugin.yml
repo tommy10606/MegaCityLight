@@ -1,0 +1,9 @@
+name: MegaCityLight
+version: '1.0.0'
+main: com.megacitycraft.light.LightPlugin
+api-version: '26.2'
+description: Persistent, permission-free night vision with /light.
+commands:
+  light:
+    description: Toggle your night vision, or explicitly enable or disable it.
+    usage: /light [on|enable|off|disable]
