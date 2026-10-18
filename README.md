@@ -3,6 +3,8 @@
 Permission-free, persistent night vision for MegaCityCraft. Built against the
 Paper 26.2 public API. No libraries or other plugins need installing.
 
+Known working versions: PaperMC 26.2, 26.3
+
 ## Install
 
 1. Stop the Minecraft server.
