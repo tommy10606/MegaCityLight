@@ -1,7 +1,7 @@
 name: MegaCityLight
 version: '${project.version}'
 main: com.megacitycraft.light.LightPlugin
-api-version: '26.2'
+api-version: '26.3'
 description: Persistent, permission-free night vision with /light.
 author: Tommy10606
 website: https://github.com/tommy10606/MegaCityLight

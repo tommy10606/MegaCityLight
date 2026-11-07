@@ -1,22 +1,22 @@
-# MegaCityLight 1.0.1
+# MegaCityLight 1.0.2
 
 Permission-free, persistent night vision for MegaCityCraft. Built against the
-Paper 26.2 public API. No libraries or other plugins need installing.
+Paper 26.3 build 244 public API. No libraries or other plugins need installing.
 
-Known working versions: PaperMC 26.2, 26.3
+Target server: PaperMC 26.3 build 244; Java 25.
 
 ## Install
 
 1. Stop the Minecraft server.
 2. Remove the old Light plugin JAR from `plugins/` so it cannot compete for `/light`.
-3. Put `MegaCityLight-1.0.1.jar` in `plugins/`.
+3. Put `MegaCityLight-1.0.2.jar` in `plugins/`.
 4. Start the server normally. No permissions or OP configuration is needed.
 
 ## Commands
 
 | Command | Behavior |
 | --- | --- |
-| `/light` | Toggle your saved night-vision setting. |
+| `/light` | Toggle based on whether night vision is actually applied. |
 | `/light on` or `/light enable` | Enable it; repeated use keeps it on. |
 | `/light off` or `/light disable` | Disable it; repeated use keeps it off. |
 | `/light version` | Show the active plugin version; works in-game and in the console. |
@@ -42,23 +42,29 @@ provided examples: gold `Lights ` followed by green `on!` or red `off!`.
   clears other effects too.
 - Enabling replaces any existing night-vision potion. Disabling removes current
   night vision, while leaving other potion effect types alone.
-- `/light` toggles the saved plugin setting, rather than detecting whether a
-  player currently has night vision from a normal potion.
-- There is no polling task that fights vanilla milk or other plugins removing
-  effects. An external effect-clearing command can remove the effect until the
-  player uses `/light on`, reconnects, or respawns.
+- `/light` checks the actual night-vision effect: if present, it turns it off;
+  if absent, it turns it on, even when an older saved preference says on.
+- External removal by a plugin (including the effect-clear operation used by
+  Essentials `/heal`) switches the saved preference off on the next tick if
+  night vision is still absent. It stays off across respawn, reconnect, and
+  restart until enabled again. Another effect applied before that check is
+  respected. Cancelled removals do not disable the saved choice.
+- Death and the respawn transition preserve the enabled preference. Replacing
+  a finite potion during `/light on` does not disable the preference.
+- There is no periodic polling or automatic reapplication after external clears.
 
 Keep `players.yml` when upgrading or moving this plugin. The old Light plugin's
 saved choices are not automatically imported.
 
 ## Version compatibility
 
-`api-version: '26.2'` declares the minimum supported API, not an exact-version
+`api-version: '26.3'` declares the minimum supported API, not an exact-version
 lock. Future Paper versions can load it if they retain the public APIs used here.
 The plugin avoids Minecraft internals, reflection, version-specific packets,
 and server-version checks to minimize the need for updates. Future breaking
 API changes can still require an update; future releases have not been tested.
-Paper 26.2 runs on Java 25; this JAR is compiled for Java 25.
+This release compiles against `paper-api:26.3.build.244-stable` and requires Java 25.
+The minimum declared API is now 26.3; this release will not load on Paper 26.2.
 
 ## Build and test
 
@@ -68,29 +74,33 @@ Use JDK 25 and Maven 3.9 or newer:
 mvn clean package
 ```
 
-The installable file is `target/MegaCityLight-1.0.1.jar`. Paper dependencies are
+The installable file is `target/MegaCityLight-1.0.2.jar`. Paper dependencies are
 provided by the server; test dependencies are not bundled into the JAR.
 
-The automated suite uses MockBukkit for Paper 26.2. It covers non-OP access,
+The automated suite uses MockBukkit for Paper 26.3. It covers non-OP access,
 toggle and idempotent aliases, invalid input, independent players, infinite
 duration and display flags, death, milk and cancelled consumption, reconnects,
 plugin disable/enable, UUID-based disk persistence, and queued restore tasks.
 MockBukkit does not reproduce vanilla's post-event effect removal, so those
-removals are explicitly simulated in the tests. A full live client/server
-gameplay test is not included.
+removals are explicitly simulated in the tests. The release passed 28 automated tests and a startup, command, and shutdown
+smoke test on Paper 26.3 build 244. A full client/server gameplay test is not included.
+Additional regressions cover actual-effect toggling after a heal-style clear,
+external removal persistence, cancelled removals, death-caused removals, and
+replacements on the same tick.
 
 ## Quick in-game check
 
 Join as a non-OP player and run `/light`. Verify night vision and the icon, then
 run `/light on` twice to confirm it stays on. Respawn, reconnect, and restart
 to check restoration. Drink milk and confirm it stays off after respawn and
-reconnect. Run `/light enable` to restore it, then `/light disable` twice to
+reconnect. Run `/light on`, then Essentials `/heal`, and verify that one `/light` command
+turns night vision back on. Run `/light enable` to restore it, then `/light disable` twice to
 confirm it stays off.
 
 ## Developer metadata
 
 `/version MegaCityLight` uses Paper's built-in plugin information command and
-shows version 1.0.1, author Tommy10606, and website
+shows version 1.0.2, author Tommy10606, and website
 https://github.com/tommy10606/MegaCityLight. Access to Paper's built-in `/version`
 command follows the server's own permissions; `/light version` is open to everyone.
 

@@ -2,6 +2,9 @@ package com.megacitycraft.light;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.logging.Level;
@@ -15,6 +18,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
@@ -25,6 +29,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 public class LightPlugin extends JavaPlugin implements Listener {
     private PlayerSettings settings;
+    private final Set<UUID> changingEffects = new HashSet<>();
+    private final Set<UUID> pendingRestores = new HashSet<>();
     private BukkitTask updateTask;
     private volatile boolean stopping;
 
@@ -55,6 +61,8 @@ public class LightPlugin extends JavaPlugin implements Listener {
     public void onDisable() {
         stopping = true;
         if (updateTask != null) updateTask.cancel();
+        pendingRestores.clear();
+        changingEffects.clear();
     }
 
     private void checkForUpdates() {
@@ -88,7 +96,7 @@ public class LightPlugin extends JavaPlugin implements Listener {
             return true;
         }
         boolean enabled;
-        if (args.length == 0) enabled = !settings.isEnabled(player.getUniqueId());
+        if (args.length == 0) enabled = !player.hasPotionEffect(PotionEffectType.NIGHT_VISION);
         else if (args.length == 1) {
             switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "on", "enable" -> enabled = true;
@@ -134,22 +142,52 @@ public class LightPlugin extends JavaPlugin implements Listener {
         if (saveChoice(player, false)) announce(player, false);
     }
 
-    private void restoreLater(Player player) {
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEffectRemoved(EntityPotionEffectEvent event) {
+        if (!(event.getEntity() instanceof Player player)
+                || !event.getModifiedType().equals(PotionEffectType.NIGHT_VISION)
+                || event.getNewEffect() != null
+                || (event.getAction() != EntityPotionEffectEvent.Action.REMOVED
+                    && event.getAction() != EntityPotionEffectEvent.Action.CLEARED)
+                || event.getCause() == EntityPotionEffectEvent.Cause.DEATH
+                || !player.isOnline()
+                || player.isDead()
+                || changingEffects.contains(player.getUniqueId())
+                || pendingRestores.contains(player.getUniqueId())
+                || !settings.isEnabled(player.getUniqueId())) return;
+        // This event precedes the actual change. Check the resulting effect on
+        // the next tick so a replacement or /light on in the meantime wins.
         getServer().getScheduler().runTask(this, () -> {
-            // Recheck the choice here: /light off or milk may have run meanwhile.
-            if (player.isOnline() && !player.isDead() && settings.isEnabled(player.getUniqueId())) apply(player);
+            if (!player.hasPotionEffect(PotionEffectType.NIGHT_VISION)
+                    && settings.isEnabled(player.getUniqueId())) saveChoice(player, false);
+        });
+    }
+
+    private void restoreLater(Player player) {
+        pendingRestores.add(player.getUniqueId());
+        getServer().getScheduler().runTask(this, () -> {
+            try {
+                // Recheck the choice: /light off, milk, or /heal may have run meanwhile.
+                if (player.isOnline() && !player.isDead() && settings.isEnabled(player.getUniqueId())) apply(player);
+            } finally {
+                pendingRestores.remove(player.getUniqueId());
+            }
         });
     }
 
     private void apply(Player player) {
-        // Replace any finite night-vision potion so /light always grants infinity
-        // and ensures the requested particle/icon settings.
+        // Replacing a finite potion is our own change, not an external clear.
         PotionEffect existing = player.getPotionEffect(PotionEffectType.NIGHT_VISION);
         if (existing != null && existing.isInfinite() && existing.getAmplifier() == 0
                 && !existing.hasParticles() && existing.hasIcon()) return;
-        player.removePotionEffect(PotionEffectType.NIGHT_VISION);
-        player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION,
-                PotionEffect.INFINITE_DURATION, 0, false, false, true));
+        changingEffects.add(player.getUniqueId());
+        try {
+            player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION,
+                    PotionEffect.INFINITE_DURATION, 0, false, false, true));
+        } finally {
+            changingEffects.remove(player.getUniqueId());
+        }
     }
 
     private boolean saveChoice(Player player, boolean enabled) {

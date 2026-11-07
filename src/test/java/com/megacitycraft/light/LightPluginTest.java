@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 import org.bukkit.Material;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -41,7 +42,7 @@ class LightPluginTest {
     @Test void versionShowsActiveMetadataWithoutChangingNightVision() {
         while (player.nextComponentMessage() != null) { /* Drain join messages. */ }
         assertTrue(player.performCommand("light version"));
-        assertEquals("MegaCityLight v1.0.1", PlainTextComponentSerializer.plainText().serialize(player.nextComponentMessage()));
+        assertEquals("MegaCityLight v1.0.2", PlainTextComponentSerializer.plainText().serialize(player.nextComponentMessage()));
         assertFalse(hasVision());
         player.performCommand("light on");
         player.performCommand("light VERSION");
@@ -176,6 +177,92 @@ class LightPluginTest {
         player.performCommand("light off");
         assertFalse(hasVision());
         assertTrue(player.hasPotionEffect(PotionEffectType.SPEED));
+    }
+
+    @Test void toggleUsesActualEffectEvenBeforeAnExternalClearIsPersisted() throws Exception {
+        player.performCommand("light on");
+        player.removePotionEffect(PotionEffectType.NIGHT_VISION); // Essentials /heal uses plugin removal.
+        assertFalse(hasVision());
+        Path file = plugin.getDataFolder().toPath().resolve("players.yml");
+        assertTrue(new PlayerSettings(file).isEnabled(player.getUniqueId())); // Old saved flag is still on.
+        player.performCommand("light");
+        assertTrue(hasVision()); // First toggle must turn it on, not turn the stale flag off.
+        tick();
+        assertTrue(hasVision());
+        assertTrue(new PlayerSettings(file).isEnabled(player.getUniqueId()));
+        player.performCommand("light");
+        assertFalse(hasVision());
+    }
+
+    @Test void healStyleClearSavesOffAndDoesNotReturnOnRespawnReconnectOrRestart() throws Exception {
+        player.performCommand("light on");
+        player.clearActivePotionEffects();
+        tick();
+        Path file = plugin.getDataFolder().toPath().resolve("players.yml");
+        assertFalse(new PlayerSettings(file).isEnabled(player.getUniqueId()));
+        player.setHealth(0); player.respawn(); tick();
+        assertFalse(hasVision());
+        player.disconnect(); player.reconnect(); tick();
+        assertFalse(hasVision());
+        server.getPluginManager().disablePlugin(plugin);
+        server.getPluginManager().enablePlugin(plugin); tick();
+        assertFalse(hasVision());
+        player.performCommand("light");
+        assertTrue(hasVision());
+    }
+
+    @Test void externalRemovalBeforeDisconnectIsStillSaved() throws Exception {
+        player.performCommand("light on");
+        player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+        player.disconnect(); tick();
+        assertFalse(new PlayerSettings(plugin.getDataFolder().toPath().resolve("players.yml")).isEnabled(player.getUniqueId()));
+        player.reconnect(); tick();
+        assertFalse(hasVision());
+    }
+
+    @Test void cancelledRemovalDoesNotDisableChoice() throws Exception {
+        server.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.HIGHEST)
+            public void cancel(EntityPotionEffectEvent event) {
+                if (event.getEntity().equals(player) && event.getModifiedType().equals(PotionEffectType.NIGHT_VISION)
+                        && event.getAction() == EntityPotionEffectEvent.Action.REMOVED) event.setCancelled(true);
+            }
+        }, plugin);
+        player.performCommand("light on");
+        player.removePotionEffect(PotionEffectType.NIGHT_VISION); tick();
+        assertTrue(hasVision());
+        assertTrue(new PlayerSettings(plugin.getDataFolder().toPath().resolve("players.yml")).isEnabled(player.getUniqueId()));
+    }
+
+    @Test void deathRemovalPreservesSavedChoice() throws Exception {
+        player.performCommand("light on");
+        player.removePotionEffect(PotionEffectType.NIGHT_VISION,
+                EntityPotionEffectEvent.Cause.DEATH, EntityPotionEffectEvent.Action.CLEARED);
+        tick();
+        assertTrue(new PlayerSettings(plugin.getDataFolder().toPath().resolve("players.yml")).isEnabled(player.getUniqueId()));
+        player.setHealth(0); player.respawn(); tick();
+        assertTrue(hasVision());
+    }
+
+    @Test void finiteReplacementAndUnrelatedEffectRemovalDoNotDisableSavedChoice() throws Exception {
+        player.performCommand("light on");
+        player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+        player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, 1200, 0));
+        player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 200, 0));
+        player.removePotionEffect(PotionEffectType.SPEED); tick();
+        assertTrue(hasVision());
+        assertTrue(new PlayerSettings(plugin.getDataFolder().toPath().resolve("players.yml")).isEnabled(player.getUniqueId()));
+        player.performCommand("light on"); tick();
+        assertTrue(player.getPotionEffect(PotionEffectType.NIGHT_VISION).isInfinite());
+        assertTrue(new PlayerSettings(plugin.getDataFolder().toPath().resolve("players.yml")).isEnabled(player.getUniqueId()));
+    }
+
+    @Test void toggleRemovesExistingPotionEvenWhenSavedPreferenceWasOff() {
+        player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, 1200, 0));
+        player.performCommand("light"); tick();
+        assertFalse(hasVision());
+        player.performCommand("light");
+        assertTrue(hasVision());
     }
 
     @Test void settingsRoundTripUsesUuidAndOffIsPersisted(@TempDir Path directory) throws Exception {
